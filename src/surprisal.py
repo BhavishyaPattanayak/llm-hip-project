@@ -56,21 +56,15 @@ def score_tokens(ids, model, device, stride=256):
     Positions restart at zero in each window. No cross-story context or BOS.
     """
     window = model.config.max_position_embeddings
-    if not 1 <= stride < window:
-        raise ValueError("stride must be between 1 and context window minus 1")
     scores = [float("nan")] * len(ids)
-    target_start = 1
     with torch.inference_mode():
-        while target_start < len(ids):
-            end = min(len(ids), window if target_start == 1 else target_start + stride)
-            begin = max(0, end - window)
+        for begin, end, target_start in context_windows(len(ids), window, stride):
             x = torch.tensor([ids[begin:end]], dtype=torch.long, device=device)
             logits = model(input_ids=x, use_cache=False).logits[0]
             local_start = target_start - begin
             loss = torch.nn.functional.cross_entropy(
                 logits[local_start - 1:-1].float(), x[0, local_start:], reduction="none")
             scores[target_start:end] = (loss / math.log(2)).cpu().tolist()
-            target_start = end
     return scores
 
 
@@ -85,3 +79,14 @@ def score_story(rows, tokenizer, model, device, stride=256):
     # Never report a partial first-word surprisal, even for a multi-BPE word.
     sums[0] = float("nan")
     return [dict(row, surprisal=sums[i], n_bpe=counts[i]) for i, row in enumerate(rows)]
+
+
+def context_windows(n_tokens, window, stride=256):
+    """Yield (begin, end, first target) using the established surprisal schedule."""
+    if not 1 <= stride < window:
+        raise ValueError("stride must be between 1 and context window minus 1")
+    target_start = 1
+    while target_start < n_tokens:
+        end = min(n_tokens, window if target_start == 1 else target_start + stride)
+        yield max(0, end - window), end, target_start
+        target_start = end
