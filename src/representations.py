@@ -56,8 +56,8 @@ def pool_states(states, owners, n_words):
     return sums / counts[:, None, None]
 
 
-def extract_story(rows, tokenizer, model, device, stride=256):
-    ids, owners = encode_regions([r['word'] for r in rows], tokenizer)
+def extract_story(rows, tokenizer, model, device, stride=256, allow_internal_whitespace=False):
+    ids, owners = encode_regions([r['word'] for r in rows], tokenizer, allow_internal_whitespace)
     n_blocks = model.config.n_layer
     sums = np.zeros((len(rows), n_blocks+1, model.config.n_embd), dtype=np.float64)
     counts = np.zeros(len(rows), dtype=int)

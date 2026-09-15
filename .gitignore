@@ -4,3 +4,7 @@ __pycache__/
 results/*
 data/naturalstories/
 .DS_Store
+
+# Local research data and archives
+data/
+*.zip

@@ -18,13 +18,13 @@ def load_model(model_name, device="auto", local_files_only=False):
     return tokenizer, model, device
 
 
-def encode_regions(words, tokenizer):
+def encode_regions(words, tokenizer, allow_internal_whitespace=False):
     """Tokenize a story once; assign offsets by overlap with known region spans.
 
     Separator spaces belong to no region. A BPE covering a leading separator
     and the following word therefore belongs exclusively to that word.
     """
-    if not words or any(not w or any(c.isspace() for c in w) for w in words):
+    if not words or any(not w.strip() or (not allow_internal_whitespace and any(c.isspace() for c in w)) for w in words):
         raise ValueError("Expected nonempty reading regions without whitespace")
     text = " ".join(words)
     spans = []
@@ -34,6 +34,27 @@ def encode_regions(words, tokenizer):
         start += len(word) + 1
     encoded = tokenizer(text, return_offsets_mapping=True, add_special_tokens=False,
                         truncation=False, verbose=False)
+    if allow_internal_whitespace:
+        # GECO can contain leading/trailing/internal whitespace inside a region.
+        # Ignore whitespace when determining whether a BPE crosses actual region text.
+        character_owner = [-1] * len(text)
+        for index, (a, b) in enumerate(spans):
+            character_owner[a:b] = [index] * (b-a)
+        owners = []
+        for a, b in encoded["offset_mapping"]:
+            candidates = {character_owner[j] for j in range(a,b)
+                          if character_owner[j] >= 0 and not text[j].isspace()}
+            if len(candidates) > 1 or a == b:
+                raise ValueError(f"BPE spans multiple reading regions: {(a,b)}")
+            if candidates:
+                owner = next(iter(candidates))
+            else:
+                within = [character_owner[j] for j in range(a,b) if character_owner[j] >= 0]
+                owner = within[-1] if within else next((i for i,(_,end) in enumerate(spans) if end > a), len(words)-1)
+            owners.append(owner)
+        if set(owners) != set(range(len(words))):
+            raise ValueError("Some reading regions have no BPE tokens")
+        return encoded["input_ids"], owners
     owners = []
     region = 0
     for start, end in encoded["offset_mapping"]:
